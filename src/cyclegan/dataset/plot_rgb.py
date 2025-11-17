@@ -26,4 +26,4 @@ def plot_rgb(date_path):
     plt.show()
 
 # Usage
-plot_rgb("/home/mrhouma/Documents/CycleGan/CycleGan/landsat_data/EU_Forest_1/2020-08-20")
+plot_rgb("/home/mrhouma/Documents/CycleGan/CycleGan/landsat_data/Delta_1/2018-02-13")
