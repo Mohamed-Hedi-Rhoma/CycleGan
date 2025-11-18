@@ -1,6 +1,12 @@
 import os 
 import json
 import torch
+import numpy as np
+
+def min_max_to_loc_scale(minimum, maximum):
+    loc = (maximum + minimum) / 2
+    scale = (maximum - minimum) / 2
+    return loc, scale
 
 path_data_sentinel = "/home/mrhouma/Documents/CycleGan/CycleGan/data_sentinel2"
 angles = []
@@ -13,8 +19,8 @@ for subdir in os.listdir(path_data_sentinel) :
                     metadata = json.load(f)
                 
                 for date , angles_data in metadata["angles_by_date"].items() : 
-                    vaa = 0  # Reset here!
-                    vza = 0  # Reset here!
+                    vaa = 0
+                    vza = 0
                     sza = angles_data["MEAN_SOLAR_ZENITH_ANGLE"]
                     saa = angles_data["MEAN_SOLAR_AZIMUTH_ANGLE"]
                     for i in [2,3,4,8,11,12] : 
@@ -23,7 +29,13 @@ for subdir in os.listdir(path_data_sentinel) :
                     vaa = vaa/6
                     vza = vza/6
                     
-                    angles.append(torch.tensor([sza, vza, saa, vaa]))
+                    # Convert to radians and apply cos
+                    sza_cos = np.cos(np.radians(sza))
+                    vza_cos = np.cos(np.radians(vza))
+                    saa_cos = np.cos(np.radians(saa))
+                    vaa_cos = np.cos(np.radians(vaa))
+                    
+                    angles.append(torch.tensor([sza_cos, vza_cos, saa_cos, vaa_cos]))
 
 path_data_landsat = "/home/mrhouma/Documents/CycleGan/CycleGan/landsat_data"
 angles_landsat = []
@@ -44,20 +56,34 @@ for subdir in os.listdir(path_data_landsat) :
                     saa = metadata["angles"]["SAA"][date.replace("SZA", "SAA")] 
                     vaa = metadata["angles"]["VAA"][date.replace("SZA", "VAA")] 
                     
-                    angles_landsat.append(torch.tensor([sza, vza, saa, vaa])) 
+                    # Convert to radians and apply cos
+                    sza_cos = np.cos(np.radians(sza))
+                    vza_cos = np.cos(np.radians(vza))
+                    saa_cos = np.cos(np.radians(saa))
+                    vaa_cos = np.cos(np.radians(vaa))
+                    
+                    angles_landsat.append(torch.tensor([sza_cos, vza_cos, saa_cos, vaa_cos])) 
 
 
-angles_tensor = torch.stack(angles,dim=0)
-print(angles_tensor.shape)
-mean_sentinel = angles_tensor.mean(dim=0)
-print(mean_sentinel)
-std_sentinel = angles_tensor.std(dim=0)
-print(std_sentinel)
+# Sentinel angles
+angles_tensor = torch.stack(angles, dim=0)
+print("Sentinel angles shape:", angles_tensor.shape)
+
+min_sentinel = angles_tensor.min(dim=0)[0]
+max_sentinel = angles_tensor.max(dim=0)[0]
+loc_sentinel, scale_sentinel = min_max_to_loc_scale(min_sentinel, max_sentinel)
+
+print("Sentinel loc:", loc_sentinel)
+print("Sentinel scale:", scale_sentinel)
 
 
-angles_tensor_landsat = torch.stack(angles_landsat,dim=0)
-print(angles_tensor_landsat.shape)
-mean_landsat = angles_tensor_landsat.mean(dim=0)
-print(mean_landsat)
-std_landsat = angles_tensor_landsat.std(dim=0)
-print(std_landsat)
+# Landsat angles
+angles_tensor_landsat = torch.stack(angles_landsat, dim=0)
+print("Landsat angles shape:", angles_tensor_landsat.shape)
+
+min_landsat = angles_tensor_landsat.min(dim=0)[0]
+max_landsat = angles_tensor_landsat.max(dim=0)[0]
+loc_landsat, scale_landsat = min_max_to_loc_scale(min_landsat, max_landsat)
+
+print("Landsat loc:", loc_landsat)
+print("Landsat scale:", scale_landsat)

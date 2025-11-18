@@ -6,7 +6,7 @@ import torch
 from rasterio.warp import reproject, Resampling
 from torchvision.transforms.functional import resize
 
-def stats(path_data, sensor="Sentinel"):
+def stats(path_data, sensor="Landsat"):
     band_names = ['blue.tif', 'green.tif', 'red.tif', 'nir.tif', 'swir1.tif', 'swir2.tif']
     
     # Collect all pixel values per band for quantile calculation
@@ -60,33 +60,33 @@ def stats(path_data, sensor="Sentinel"):
                     if not skip_date:
                         print(f"Processed {date_path}")
     
-    # Concatenate all pixels per band and compute stats
+    # Concatenate all pixels per band and compute quantile-based stats
     means = []
     stds = []
+    max_samples = int(1e7)
+    
     for i in range(6):
         if len(all_pixels[i]) > 0:
             band_data = torch.cat(all_pixels[i]).float()
             
-            # Sample if too large (e.g., sample 10 million pixels max)
-            max_samples = 10_000_000
+            # Sample if too large
             if band_data.numel() > max_samples:
                 indices = torch.randperm(band_data.numel())[:max_samples]
                 band_data_sampled = band_data[indices]
             else:
                 band_data_sampled = band_data
             
-            q_min = torch.quantile(band_data_sampled, 0.1)
-            q_max = torch.quantile(band_data_sampled, 0.95)
+            # Quantile-based normalization (median for mean, IQR for std)
+            norm_mean = torch.quantile(band_data_sampled, q=0.5)
+            norm_std = torch.quantile(band_data_sampled, q=0.95) - torch.quantile(band_data_sampled, q=0.05)
             
-            # Clip the full data (not just sampled)
-            clipped = torch.clamp(band_data_sampled, min=q_min, max=q_max)
-            means.append(clipped.mean())
-            stds.append(clipped.std())
+            means.append(norm_mean)
+            stds.append(norm_std)
             
             # Free memory
-            del band_data, band_data_sampled, clipped
+            del band_data, band_data_sampled
             torch.cuda.empty_cache() if torch.cuda.is_available() else None
     
     return torch.tensor(means), torch.tensor(stds)
 
-print(stats(path_data="/home/mrhouma/Documents/CycleGan/CycleGan/data_sentinel2"))
+print(stats(path_data="/home/mrhouma/Documents/CycleGan/CycleGan/landsat_data"))

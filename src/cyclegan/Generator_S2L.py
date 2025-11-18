@@ -105,7 +105,7 @@ class Generator_S2L(nn.Module):
         self.norm8 = nn.InstanceNorm2d(num_features=32)
         
         self.conv7 = nn.Conv2d(in_channels=32, out_channels=6, kernel_size=7, padding=3, stride=1)
-        nn.init.kaiming_normal_(self.conv7.weight, nonlinearity='tanh')
+        nn.init.xavier_uniform_(self.conv7.weight)
 
     def forward(self, x, angles):
         # x: [B, 6, 384, 384]
@@ -155,6 +155,6 @@ class Generator_S2L(nn.Module):
         out = torch.relu(out)
 
         out = self.conv7(out)  # [B, 6, 128, 128]
-        out = torch.tanh(out)
+        
 
         return out

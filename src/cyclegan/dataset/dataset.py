@@ -8,23 +8,49 @@ import rasterio
 import numpy as np
 from torchvision.transforms.functional import resize
 from rasterio.warp import reproject, Resampling
+
+def torch_select_unsqueeze(tensor, select_dim, nb_dim):
+    """Helper function to unsqueeze tensor to match nb_dim"""
+    shape = [1] * nb_dim
+    shape[select_dim] = -1
+    return tensor.view(shape)
+
+def standardize(x, loc, scale, dim=0):
+    nb_dim = len(x.size())
+    standardized_x = (
+        x - torch_select_unsqueeze(loc, select_dim=dim, nb_dim=nb_dim)
+    ) / torch_select_unsqueeze(scale, select_dim=dim, nb_dim=nb_dim)
+    return standardized_x
+
+def unstandardize(x, loc, scale, dim=0):
+    nb_dim = len(x.size())
+    unstandardized_x = (
+        x * torch_select_unsqueeze(scale, select_dim=dim, nb_dim=nb_dim)
+    ) + torch_select_unsqueeze(loc, select_dim=dim, nb_dim=nb_dim)
+    return unstandardized_x
+
 class dataset(Dataset):
     def __init__(self , path_data_sentinel,path_data_landsat ):
         super().__init__()
-
 
         self.path_list_sentinel = []
         self.path_list_landsat = []
         self.angles_sentinel = {}
         self.angles_landsat = {}
-        self.normalize_landsat = transforms.Normalize(
-            mean=[0.0795, 0.1130, 0.1353, 0.2234, 0.1995, 0.1528],
-            std=[0.0651, 0.0767, 0.1059, 0.1264, 0.1359, 0.1125]
-        )
-        self.normalize_sentinel = transforms.Normalize(
-            mean=[0.0826, 0.1048, 0.1230, 0.2006, 0.1860, 0.1494],
-            std=[0.0714, 0.0797, 0.1048, 0.1327, 0.1318, 0.1132]
-        )
+        
+        # Landsat statistics
+        self.landsat_mean = torch.tensor([0.0607, 0.0893, 0.1058, 0.2282, 0.1923, 0.1370])
+        self.landsat_std = torch.tensor([0.3014, 0.3119, 0.4129, 0.4810, 0.4955, 0.4050])
+        
+        # Sentinel statistics
+        self.sentinel_mean = torch.tensor([0.0627, 0.0852, 0.0981, 0.2051, 0.1842, 0.1372])
+        self.sentinel_std = torch.tensor([0.2806, 0.3053, 0.3890, 0.4685, 0.4471, 0.3791])
+        
+        # Angle statistics (loc and scale from cos-transformed angles)
+        self.sentinel_angles_loc = torch.tensor([0.5275, 0.9903, -0.0571, -0.0576], dtype=torch.float32)
+        self.sentinel_angles_scale = torch.tensor([0.4351, 0.0093, 0.9429, 0.9418], dtype=torch.float32)
+        self.landsat_angles_loc = torch.tensor([0.5419, 0.9947, 0.0001, 0.0442], dtype=torch.float32)
+        self.landsat_angles_scale = torch.tensor([0.4581, 0.0053, 0.9999, 0.9558], dtype=torch.float32)
         
         for subdir in os.listdir(path_data_sentinel) : 
             subdir_path = os.path.join(path_data_sentinel,subdir)
@@ -44,8 +70,15 @@ class dataset(Dataset):
                         vza += angles_data[f"MEAN_INCIDENCE_ZENITH_ANGLE_B{i}"]
                     vaa = vaa/6
                     vza = vza/6
+                    
+                    # Convert to cos(radians)
+                    sza_cos = np.cos(np.radians(sza))
+                    vza_cos = np.cos(np.radians(vza))
+                    saa_cos = np.cos(np.radians(saa))
+                    vaa_cos = np.cos(np.radians(vaa))
+                    
                     site_date = site_name +"_"+date
-                    self.angles_sentinel[site_date]= [sza, vza, saa, vaa]
+                    self.angles_sentinel[site_date] = [sza_cos, vza_cos, saa_cos, vaa_cos]
                 for dir in os.listdir(subdir_path) :
                     subsubdir_path = os.path.join(subdir_path,dir) 
                     if os.path.isdir(subsubdir_path):
@@ -69,22 +102,21 @@ class dataset(Dataset):
                     saa = metadata["angles"]["SAA"][date] 
                     vaa = metadata["angles"]["VAA"][date] 
                     
-                    self.angles_landsat[site_date] = [sza, vza, saa, vaa] 
+                    # Convert to cos(radians)
+                    sza_cos = np.cos(np.radians(sza))
+                    vza_cos = np.cos(np.radians(vza))
+                    saa_cos = np.cos(np.radians(saa))
+                    vaa_cos = np.cos(np.radians(vaa))
+                    
+                    self.angles_landsat[site_date] = [sza_cos, vza_cos, saa_cos, vaa_cos]
                 for dir in os.listdir(subdir_path) : 
                         subsubdir = os.path.join(subdir_path,dir)
                         if os.path.isdir(subsubdir):
                                 self.path_list_landsat.append(subsubdir)
-        
-
 
     def __len__(self) : 
         return(len(self.path_list_landsat))
-    def normalize_angles(self, angles, mean, std):
-        """Normalize angle values using mean and std"""
-        angles = torch.tensor(angles, dtype=torch.float32)
-        mean = torch.tensor(mean, dtype=torch.float32)
-        std = torch.tensor(std, dtype=torch.float32)
-        return (angles - mean) / std
+    
     def __getitem__(self, index):
         path_landsat = self.path_list_landsat[index]
         band_names = ['blue.tif', 'green.tif', 'red.tif', 'nir.tif', 'swir1.tif', 'swir2.tif']
@@ -102,7 +134,7 @@ class dataset(Dataset):
             data_resized = resize(data_tensor, [128,128]).squeeze(0)
             ref_list.append(data_resized)
         data_tensor_landsat = torch.stack(ref_list,dim=0)
-        data_tensor_landsat = self.normalize_landsat(data_tensor_landsat)
+        data_tensor_landsat = standardize(data_tensor_landsat, self.landsat_mean, self.landsat_std, dim=0)
 
         # Random index for Sentinel
         random_index = torch.randint(0, len(self.path_list_sentinel), (1,)).item()
@@ -143,28 +175,25 @@ class dataset(Dataset):
             data_resized = resize(data_tensor, [384, 384]).squeeze(0)
             ref_list_sentinel.append(data_resized)
         data_tensor_sentinel = torch.stack(ref_list_sentinel,dim=0)
-        data_tensor_sentinel = self.normalize_sentinel(data_tensor_sentinel)
-        data_tensor_sentinel = torch.clamp(data_tensor_sentinel, -3, 3)
-        data_tensor_landsat = torch.clamp(data_tensor_landsat, -3, 3)
+        data_tensor_sentinel = standardize(data_tensor_sentinel, self.sentinel_mean, self.sentinel_std, dim=0)
 
-        list_angles_sentinel = self.normalize_angles(
-            list_angles_sentinel,
-            [40.3609, 5.8707, 119.3870, 187.6938],
-            [14.9709, 2.4810, 50.8305, 78.1721]
+        # Standardize angles using loc and scale
+        list_angles_sentinel = standardize(
+            torch.tensor(list_angles_sentinel, dtype=torch.float32),
+            self.sentinel_angles_loc,
+            self.sentinel_angles_scale,
+            dim=0
         )
-        list_angles_landsat = self.normalize_angles(
-            list_angles_landsat,
-            [40.5064, 3.9567, 109.0848, 17.1651],
-            [16.0608, 2.4479, 57.1288, 90.3701]
-)
-
+        list_angles_landsat = standardize(
+            torch.tensor(list_angles_landsat, dtype=torch.float32),
+            self.landsat_angles_loc,
+            self.landsat_angles_scale,
+            dim=0
+        )
 
         return data_tensor_landsat,list_angles_landsat,data_tensor_sentinel,list_angles_sentinel
 
-            
-
 #test
-
 data = dataset(path_data_landsat="/home/mrhouma/Documents/CycleGan/CycleGan/landsat_data",path_data_sentinel="/home/mrhouma/Documents/CycleGan/CycleGan/data_sentinel2")
 tensor_landsat , angles_landsat ,tensor_sentinel , angles_sentinel = data[500]
 print(tensor_landsat.shape , tensor_landsat.min(), tensor_landsat.max())
@@ -174,12 +203,3 @@ print(tensor_sentinel.shape , tensor_sentinel.min(), tensor_sentinel.max())
 print(angles_sentinel.shape , angles_sentinel.min(), angles_sentinel.max())
 print(tensor_sentinel.amax(dim=(1, 2)))  # Max value per channel
 print((tensor_sentinel > 2).sum())  # Count how many pixels are outliers
-
-
-        
-
-
-
-        
-
-        
