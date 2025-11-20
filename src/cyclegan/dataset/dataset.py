@@ -29,7 +29,7 @@ def unstandardize(x, loc, scale, dim=0):
     ) + torch_select_unsqueeze(loc, select_dim=dim, nb_dim=nb_dim)
     return unstandardized_x
 
-class dataset(Dataset):
+class Gan_dataset(Dataset):
     def __init__(self , path_data_sentinel,path_data_landsat ):
         super().__init__()
 

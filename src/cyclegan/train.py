@@ -1,3 +1,6 @@
+import sys
+sys.path.append('/home/mrhouma/Documents/CycleGan/CycleGan/src/cyclegan')
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -17,10 +20,9 @@ from cyclegan.MultiScaleDiscriminator_Landsat import MultiScaleDiscriminator_Lan
 from cyclegan.MultiScaleDiscriminator_Sentinel import MultiScaleDiscriminator_Sentinel
 
 # Import your dataset
-from cyclegan.dataset import dataset  # or whatever your dataset class is called
+from cyclegan.dataset.dataset import Gan_dataset  # or whatever your dataset class is called
 
-# Import your standardization functions for visualization
-from cyclegan.dataset import unstandardize
+from cyclegan.dataset.dataset import unstandardize 
 
 
 
@@ -67,7 +69,7 @@ print(f"Using device: {config['device']}")
 os.makedirs(config['checkpoint_dir'], exist_ok=True)
 os.makedirs(config['results_dir'], exist_ok=True)
 
-full_dataset = dataset(path_data_landsat=config['path_landsat'],path_data_sentinel=config['path_sentinel'])
+full_dataset = Gan_dataset(path_data_landsat=config['path_landsat'],path_data_sentinel=config['path_sentinel'])
 # Split: 90% train, 10% validation
 train_size = int(0.9 * len(full_dataset))
 val_size = len(full_dataset) - train_size

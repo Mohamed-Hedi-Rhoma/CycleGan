@@ -4,3 +4,5 @@
 *.egg-info
 data_sentinel2
 landsat_data
+results
+checkpoints
