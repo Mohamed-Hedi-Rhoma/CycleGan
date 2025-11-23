@@ -16,7 +16,7 @@ ee.Initialize(project='ee-get-landsat-data')
 # Global constants
 OUTPUT_DIR = "landsat_data"  # Base directory for output
 MAX_CLOUD_COVER = 20  # Maximum allowed cloud cover percentage
-START_DATE = "2018-01-01"  # Start date for data collection
+START_DATE = "2015-01-01"  # Start date for data collection
 END_DATE = "2022-12-31"  # End date for data collection
 
 # Define 50 sites with different landcover types and geographic locations

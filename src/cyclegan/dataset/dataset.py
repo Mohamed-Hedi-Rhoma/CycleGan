@@ -30,13 +30,16 @@ def unstandardize(x, loc, scale, dim=0):
     return unstandardized_x
 
 class Gan_dataset(Dataset):
-    def __init__(self , path_data_sentinel,path_data_landsat ):
+    def __init__(self, path_data_sentinel, path_data_landsat):
         super().__init__()
-
+    
         self.path_list_sentinel = []
         self.path_list_landsat = []
         self.angles_sentinel = {}
         self.angles_landsat = {}
+        
+        # Band names to check
+        self.band_names = ['blue.tif', 'green.tif', 'red.tif', 'nir.tif', 'swir1.tif', 'swir2.tif']
         
         # Landsat statistics
         self.landsat_mean = torch.tensor([0.0607, 0.0893, 0.1058, 0.2282, 0.1923, 0.1370])
@@ -46,30 +49,45 @@ class Gan_dataset(Dataset):
         self.sentinel_mean = torch.tensor([0.0627, 0.0852, 0.0981, 0.2051, 0.1842, 0.1372])
         self.sentinel_std = torch.tensor([0.2806, 0.3053, 0.3890, 0.4685, 0.4471, 0.3791])
         
-        # Angle statistics (loc and scale from cos-transformed angles)
+        # Angle statistics
         self.sentinel_angles_loc = torch.tensor([0.5275, 0.9903, -0.0571, -0.0576], dtype=torch.float32)
         self.sentinel_angles_scale = torch.tensor([0.4351, 0.0093, 0.9429, 0.9418], dtype=torch.float32)
         self.landsat_angles_loc = torch.tensor([0.5419, 0.9947, 0.0001, 0.0442], dtype=torch.float32)
         self.landsat_angles_scale = torch.tensor([0.4581, 0.0053, 0.9999, 0.9558], dtype=torch.float32)
         
-        for subdir in os.listdir(path_data_sentinel) : 
-            subdir_path = os.path.join(path_data_sentinel,subdir)
-            if os.path.isdir(subdir_path) : 
+        # Temp storage
+        temp_sentinel_paths = []
+        temp_landsat_paths = []
+        
+        # ============================================
+        # LOAD SENTINEL DATA
+        # ============================================
+        
+        for subdir in os.listdir(path_data_sentinel):
+            subdir_path = os.path.join(path_data_sentinel, subdir)
+            if os.path.isdir(subdir_path):
                 site_name = os.path.basename(subdir_path)
-                json_file_path = os.path.join(subdir_path,"site_metadata.json")
-                with open(json_file_path,'r') as f : 
+                json_file_path = os.path.join(subdir_path, "site_metadata.json")
+                
+                # Check if metadata exists
+                if not os.path.exists(json_file_path):
+                    print(f"Warning: No metadata for Sentinel site {site_name}, skipping...")
+                    continue
+                    
+                with open(json_file_path, 'r') as f:
                     metadata = json.load(f)
                 
-                for date , angles_data in metadata["angles_by_date"].items() : 
+                # Load angles
+                for date, angles_data in metadata["angles_by_date"].items():
                     vaa = 0
                     vza = 0
                     sza = angles_data["MEAN_SOLAR_ZENITH_ANGLE"]
                     saa = angles_data["MEAN_SOLAR_AZIMUTH_ANGLE"]
-                    for i in [2,3,4,8,11,12] : 
+                    for i in [2, 3, 4, 8, 11, 12]:
                         vaa += angles_data[f"MEAN_INCIDENCE_AZIMUTH_ANGLE_B{i}"]
                         vza += angles_data[f"MEAN_INCIDENCE_ZENITH_ANGLE_B{i}"]
-                    vaa = vaa/6
-                    vza = vza/6
+                    vaa = vaa / 6
+                    vza = vza / 6
                     
                     # Convert to cos(radians)
                     sza_cos = np.cos(np.radians(sza))
@@ -77,30 +95,42 @@ class Gan_dataset(Dataset):
                     saa_cos = np.cos(np.radians(saa))
                     vaa_cos = np.cos(np.radians(vaa))
                     
-                    site_date = site_name +"_"+date
+                    site_date = f"{site_name}_{date}"
                     self.angles_sentinel[site_date] = [sza_cos, vza_cos, saa_cos, vaa_cos]
-                for dir in os.listdir(subdir_path) :
-                    subsubdir_path = os.path.join(subdir_path,dir) 
-                    if os.path.isdir(subsubdir_path):
-                        self.path_list_sentinel.append(subsubdir_path)
-
-            
-        for subdir in os.listdir(path_data_landsat) : 
-            subdir_path = os.path.join(path_data_landsat,subdir)
-            if os.path.isdir(subdir_path) : 
                 
+                # Collect image paths
+                for dir in os.listdir(subdir_path):
+                    subsubdir_path = os.path.join(subdir_path, dir)
+                    if os.path.isdir(subsubdir_path):
+                        temp_sentinel_paths.append(subsubdir_path)
+    
+        # ============================================
+        # LOAD LANDSAT DATA
+        # ============================================
+        
+        for subdir in os.listdir(path_data_landsat):
+            subdir_path = os.path.join(path_data_landsat, subdir)
+            if os.path.isdir(subdir_path):
                 site_name = os.path.basename(subdir_path)
-                json_file_path = os.path.join(subdir_path,"site_metadata.json")
-                with open(json_file_path,'r') as f : 
+                json_file_path = os.path.join(subdir_path, "site_metadata.json")
+                
+                # Check if metadata exists
+                if not os.path.exists(json_file_path):
+                    print(f"Warning: No metadata for Landsat site {site_name}, skipping...")
+                    continue
+                    
+                with open(json_file_path, 'r') as f:
                     metadata = json.load(f)
+                
+                # Load angles
                 for date in metadata["angles"]["SZA"].keys():
                     date_clean = date[:10]
                     site_date = f"{site_name}_{date_clean}"
                     
-                    sza = metadata["angles"]["SZA"][date] 
-                    vza = metadata["angles"]["VZA"][date] 
-                    saa = metadata["angles"]["SAA"][date] 
-                    vaa = metadata["angles"]["VAA"][date] 
+                    sza = metadata["angles"]["SZA"][date]
+                    vza = metadata["angles"]["VZA"][date]
+                    saa = metadata["angles"]["SAA"][date]
+                    vaa = metadata["angles"]["VAA"][date]
                     
                     # Convert to cos(radians)
                     sza_cos = np.cos(np.radians(sza))
@@ -109,10 +139,77 @@ class Gan_dataset(Dataset):
                     vaa_cos = np.cos(np.radians(vaa))
                     
                     self.angles_landsat[site_date] = [sza_cos, vza_cos, saa_cos, vaa_cos]
-                for dir in os.listdir(subdir_path) : 
-                        subsubdir = os.path.join(subdir_path,dir)
-                        if os.path.isdir(subsubdir):
-                                self.path_list_landsat.append(subsubdir)
+                
+                # Collect image paths
+                for dir in os.listdir(subdir_path):
+                    subsubdir = os.path.join(subdir_path, dir)
+                    if os.path.isdir(subsubdir):
+                        temp_landsat_paths.append(subsubdir)
+    
+        # ============================================
+        # VALIDATE: Keep only paths with angles AND all bands
+        # ============================================
+        
+        # Filter Landsat paths
+        skipped_landsat = 0
+        for path in temp_landsat_paths:
+            date = os.path.basename(path)
+            site = os.path.basename(os.path.dirname(path))
+            key = f"{site}_{date}"
+            
+            # Check 1: angles exist
+            if key not in self.angles_landsat:
+                skipped_landsat += 1
+                continue
+            
+            # Check 2: all band files exist
+            all_bands_exist = True
+            for band in self.band_names:
+                if not os.path.exists(os.path.join(path, band)):
+                    all_bands_exist = False
+                    break
+            
+            if all_bands_exist:
+                self.path_list_landsat.append(path)
+            else:
+                skipped_landsat += 1
+    
+        # Filter Sentinel paths
+        skipped_sentinel = 0
+        for path in temp_sentinel_paths:
+            date = os.path.basename(path)
+            site = os.path.basename(os.path.dirname(path))
+            key = f"{site}_{date}"
+            
+            # Check 1: angles exist
+            if key not in self.angles_sentinel:
+                skipped_sentinel += 1
+                continue
+            
+            # Check 2: all band files exist
+            all_bands_exist = True
+            for band in self.band_names:
+                if not os.path.exists(os.path.join(path, band)):
+                    all_bands_exist = False
+                    break
+            
+            if all_bands_exist:
+                self.path_list_sentinel.append(path)
+            else:
+                skipped_sentinel += 1
+    
+        # ============================================
+        # PRINT SUMMARY
+        # ============================================
+        
+        print("=" * 50)
+        print("Dataset loaded successfully!")
+        print("=" * 50)
+        print(f"Valid Landsat samples: {len(self.path_list_landsat)}")
+        print(f"Valid Sentinel samples: {len(self.path_list_sentinel)}")
+        print(f"Skipped Landsat (missing angles/bands): {skipped_landsat}")
+        print(f"Skipped Sentinel (missing angles/bands): {skipped_sentinel}")
+        print("=" * 50)
 
     def __len__(self) : 
         return(len(self.path_list_landsat))
