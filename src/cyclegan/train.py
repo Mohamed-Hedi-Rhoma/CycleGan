@@ -132,8 +132,7 @@ scheduler_D = optim.lr_scheduler.ReduceLROnPlateau(
     mode='min',
     factor=0.5,
     patience=10,
-    verbose=True,
-    min_lr=1e-6
+    min_lr=1e-6,
 )
 
 criterion_GAN = nn.MSELoss()
@@ -286,7 +285,9 @@ history = {
     'L_G': [],
     'L_cycle': [],
     'L_GAN': [],
+    'L_SAM': [],  # ADD THIS
     'val_cycle': [],
+    'val_SAM': []  # ADD THIS
 }
 
 best_val_cycle = float('inf')
@@ -307,14 +308,15 @@ fixed_sentinel_2 = fixed_val_batch2[2][:4].to(config['device'])
 fixed_angles_S_2 = fixed_val_batch2[3][:4].to(config['device'])
 
 
-def validate(G_L2S, G_S2L, val_loader, criterion_cycle, device):
+def validate(G_L2S, G_S2L, val_loader, criterion_cycle, criterion_SAM, device):
     G_L2S.eval()
     G_S2L.eval()
     
     val_cycle_losses = []
+    val_SAM_losses = []  # ADD THIS
     
     # Per-band accumulators for Landsat and Sentinel
-    landsat_band_errors = torch.zeros(6)  # 6 bands
+    landsat_band_errors = torch.zeros(6)
     sentinel_band_errors = torch.zeros(6)
     num_samples = 0
     
@@ -331,21 +333,26 @@ def validate(G_L2S, G_S2L, val_loader, criterion_cycle, device):
             fake_landsat = G_S2L(sentinel_real, angles_L)
             rec_sentinel = G_L2S(fake_landsat, angles_S)
             
+            # Cycle loss
             loss_cycle_L = criterion_cycle(rec_landsat, landsat_real)
             loss_cycle_S = criterion_cycle(rec_sentinel, sentinel_real)
             loss_cycle = loss_cycle_L + loss_cycle_S
             
+            # SAM loss
+            loss_SAM_L = criterion_SAM(rec_landsat, landsat_real)
+            loss_SAM_S = criterion_SAM(rec_sentinel, sentinel_real)
+            loss_SAM = loss_SAM_L + loss_SAM_S
+            
             val_cycle_losses.append(loss_cycle.item())
+            val_SAM_losses.append(loss_SAM.item())  # ADD THIS
             
             # Compute per-band MAE
-            # Landsat: [B, 6, 128, 128]
-            landsat_error = torch.abs(rec_landsat - landsat_real)  # [B, 6, H, W]
-            landsat_band_mae = landsat_error.mean(dim=[0, 2, 3])  # [6] - average over batch and spatial dims
+            landsat_error = torch.abs(rec_landsat - landsat_real)
+            landsat_band_mae = landsat_error.mean(dim=[0, 2, 3])
             landsat_band_errors += landsat_band_mae.cpu()
             
-            # Sentinel: [B, 6, 384, 384]
             sentinel_error = torch.abs(rec_sentinel - sentinel_real)
-            sentinel_band_mae = sentinel_error.mean(dim=[0, 2, 3])  # [6]
+            sentinel_band_mae = sentinel_error.mean(dim=[0, 2, 3])
             sentinel_band_errors += sentinel_band_mae.cpu()
             
             num_samples += 1
@@ -357,7 +364,7 @@ def validate(G_L2S, G_S2L, val_loader, criterion_cycle, device):
     G_L2S.train()
     G_S2L.train()
     
-    return np.mean(val_cycle_losses), landsat_band_errors, sentinel_band_errors
+    return np.mean(val_cycle_losses), np.mean(val_SAM_losses), landsat_band_errors, sentinel_band_errors
 
 
 def save_checkpoint(epoch, G_L2S, G_S2L, D_Landsat, D_Sentinel, 
@@ -481,32 +488,35 @@ for epoch in range(config['num_epochs']):
         })
     
     # VALIDATION
-    val_cycle, landsat_band_errors, sentinel_band_errors = validate(G_L2S, G_S2L, val_loader, criterion_cycle, config['device'])
+    val_cycle, val_SAM, landsat_band_errors, sentinel_band_errors = validate(
+    G_L2S, G_S2L, val_loader, criterion_cycle, criterion_SAM, config['device']
+    )
     
     # Store epoch averages
     history['L_D'].append(np.mean(epoch_L_D))
     history['L_G'].append(np.mean(epoch_L_G))
     history['L_cycle'].append(np.mean(epoch_L_cycle))
     history['L_GAN'].append(np.mean(epoch_L_GAN))
+    history['L_SAM'].append(np.mean(epoch_L_SAM)) 
     history['val_cycle'].append(val_cycle)
-    
-    print(f"\nEpoch {epoch+1}/{config['num_epochs']} Summary:")
-    print(f"  L_D: {history['L_D'][-1]:.4f}")
-    print(f"  L_G: {history['L_G'][-1]:.4f}")
-    print(f"  Train cycle: {history['L_cycle'][-1]:.4f}")
-    print(f"  Val cycle: {val_cycle:.4f}")
-    print(f"  L_GAN: {history['L_GAN'][-1]:.4f}")
-    
-    scheduler_G.step(val_cycle)
-    scheduler_D.step(val_cycle)
+    history['val_SAM'].append(val_SAM)  
 
+    # Compute combined validation metric
+    val_combined = val_cycle + config['lambda_SAM'] * val_SAM
+    
+    scheduler_G.step(val_combined)
+    scheduler_D.step(val_combined)
+    
+    # Band names for printing
     band_names = ['Blue', 'Green', 'Red', 'NIR', 'SWIR1', 'SWIR2']
-
+    
     print(f"\nEpoch {epoch+1}/{config['num_epochs']} Summary:")
     print(f"  L_D: {history['L_D'][-1]:.4f}")
     print(f"  L_G: {history['L_G'][-1]:.4f}")
     print(f"  Train cycle: {history['L_cycle'][-1]:.4f}")
     print(f"  Val cycle: {val_cycle:.4f}")
+    print(f"  Train SAM: {history['L_SAM'][-1]:.4f}")  
+    print(f"  Val SAM: {val_SAM:.4f}")  
     print(f"  L_GAN: {history['L_GAN'][-1]:.4f}")
     
     # Print per-band errors
