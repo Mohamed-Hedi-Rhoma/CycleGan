@@ -2,9 +2,9 @@ import torch
 import torch.nn as nn
 
 
-class Resblock(nn.Module) : 
-    def __init__(self, n_chan = 256, dropout = 0.2, angle_embd = 256):
-        super(Resblock,self).__init__()
+class Resblock(nn.Module): 
+    def __init__(self, n_chan=256, dropout=0.2, angle_embd=256):
+        super(Resblock, self).__init__()
         self.conv1 = nn.Conv2d(n_chan, n_chan, kernel_size=3, stride=1, padding=1)
         self.instance_norm1 = nn.InstanceNorm2d(
             num_features=n_chan,      
@@ -87,13 +87,17 @@ class Generator_S2L(nn.Module):
             Resblock(n_chan=256, angle_embd=256) for _ in range(9)
         ])
 
-        # Decoder
-        self.transposeconv1 = nn.ConvTranspose2d(in_channels=256, out_channels=128, kernel_size=3, stride=2, padding=1, output_padding=1)
-        nn.init.kaiming_normal_(self.transposeconv1.weight, nonlinearity='relu')
+        # Decoder - FIXED: Using PixelShuffle instead of ConvTranspose2d
+        # First upsample: 32x32 → 64x64
+        self.conv_pixelshuffle1 = nn.Conv2d(in_channels=256, out_channels=128 * 4, kernel_size=3, stride=1, padding=1)
+        nn.init.kaiming_normal_(self.conv_pixelshuffle1.weight, nonlinearity='relu')
+        self.pixelshuffle1 = nn.PixelShuffle(upscale_factor=2)  # 128*4 → 128 channels at 2x resolution
         self.norm5 = nn.InstanceNorm2d(num_features=128)
         
-        self.transposeconv2 = nn.ConvTranspose2d(in_channels=128, out_channels=64, kernel_size=3, stride=2, padding=1, output_padding=1)
-        nn.init.kaiming_normal_(self.transposeconv2.weight, nonlinearity='relu')
+        # Second upsample: 64x64 → 128x128
+        self.conv_pixelshuffle2 = nn.Conv2d(in_channels=128, out_channels=64 * 4, kernel_size=3, stride=1, padding=1)
+        nn.init.kaiming_normal_(self.conv_pixelshuffle2.weight, nonlinearity='relu')
+        self.pixelshuffle2 = nn.PixelShuffle(upscale_factor=2)  # 64*4 → 64 channels at 2x resolution
         self.norm6 = nn.InstanceNorm2d(num_features=64)
         
         self.conv5 = nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1, padding=1)
@@ -137,12 +141,14 @@ class Generator_S2L(nn.Module):
         for resblock in self.resblocks:
             out = resblock(out, angles_embd)  # [B, 256, 32, 32]
 
-        # Decoder
-        out = self.transposeconv1(out)  # [B, 128, 64, 64]
+        # Decoder - FIXED: PixelShuffle upsampling
+        out = self.conv_pixelshuffle1(out)  # [B, 256, 32, 32] → [B, 512, 32, 32]
+        out = self.pixelshuffle1(out)        # [B, 512, 32, 32] → [B, 128, 64, 64]
         out = self.norm5(out)
         out = torch.relu(out)
 
-        out = self.transposeconv2(out)  # [B, 64, 128, 128]
+        out = self.conv_pixelshuffle2(out)  # [B, 128, 64, 64] → [B, 256, 64, 64]
+        out = self.pixelshuffle2(out)        # [B, 256, 64, 64] → [B, 64, 128, 128]
         out = self.norm6(out)
         out = torch.relu(out)
 
@@ -156,5 +162,4 @@ class Generator_S2L(nn.Module):
 
         out = self.conv7(out)  # [B, 6, 128, 128]
         
-
         return out

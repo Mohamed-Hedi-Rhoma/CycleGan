@@ -290,7 +290,7 @@ class Gan_dataset(Dataset):
 
         return data_tensor_landsat,list_angles_landsat,data_tensor_sentinel,list_angles_sentinel
 
-#test
+"""#test
 data = Gan_dataset(path_data_landsat="/home/mrhouma/Documents/CycleGan/CycleGan/landsat_data",path_data_sentinel="/home/mrhouma/Documents/CycleGan/CycleGan/data_sentinel2")
 tensor_landsat , angles_landsat ,tensor_sentinel , angles_sentinel = data[500]
 print(tensor_landsat.shape , tensor_landsat.min(), tensor_landsat.max())
@@ -299,4 +299,4 @@ print(tensor_landsat.amax(dim=(1, 2)))  # Max value per channel
 print(tensor_sentinel.shape , tensor_sentinel.min(), tensor_sentinel.max())
 print(angles_sentinel.shape , angles_sentinel.min(), angles_sentinel.max())
 print(tensor_sentinel.amax(dim=(1, 2)))  # Max value per channel
-print((tensor_sentinel > 2).sum())  # Count how many pixels are outliers
+print((tensor_sentinel > 2).sum())  # Count how many pixels are outliers"""

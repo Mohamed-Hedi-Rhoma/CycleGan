@@ -5,4 +5,7 @@
 data_sentinel2
 landsat_data
 results
-checkpoints
+checkpoints/*.pth
+checkpoints/*.pt
+Data
+api_test_results
